@@ -1,0 +1,447 @@
+# 使用方法とAPI仕様
+
+## 基本的な使用方法
+
+### 1. プロジェクトのセットアップ
+
+#### 必要なファイル
+- Unity 2019以降
+- BA_PointCloudRenderer.unitypackage
+- Potreeフォーマットのポイントクラウドデータ
+
+#### インポート手順
+1. 新しいUnityプロジェクトを作成
+2. Assets → Import Package → Custom Package
+3. BA_PointCloudRenderer.unitypackageを選択
+4. 全てのファイルをインポート
+
+### 2. シーンのセットアップ
+
+#### カメラの設定
+```csharp
+// CameraControllerの追加（オプション）
+1. Main Cameraを選択
+2. Add Component → Scripts → BAPointCloudRenderer.Controllers → CameraController
+3. 移動速度やマウス感度を調整
+```
+
+#### ポイントクラウドセットの作成
+```csharp
+// 1. 空のGameObjectを作成
+GameObject pointCloudSet = new GameObject("PointCloudSet");
+
+// 2. PointCloudSetコンポーネントを追加
+// 静的表示用
+StaticPointCloudSet staticSet = pointCloudSet.AddComponent<StaticPointCloudSet>();
+
+// または動的表示用
+DynamicPointCloudSet dynamicSet = pointCloudSet.AddComponent<DynamicPointCloudSet>();
+```
+
+#### メッシュ設定の作成
+```csharp
+// 1. 空のGameObjectを作成
+GameObject meshConfig = new GameObject("MeshConfiguration");
+
+// 2. メッシュ設定コンポーネントを追加
+DefaultMeshConfiguration config = meshConfig.AddComponent<DefaultMeshConfiguration>();
+
+// 3. 基本設定
+config.pointSize = 2.0f;
+config.screenSize = true;
+config.renderCamera = Camera.main;
+
+// 4. PointCloudSetに設定を適用
+staticSet.meshConfiguration = config;
+```
+
+#### ポイントクラウドローダーの作成
+```csharp
+// 1. 空のGameObjectを作成
+GameObject loader = new GameObject("PointCloudLoader");
+
+// 2. ローダーコンポーネントを追加
+PointCloudLoader cloudLoader = loader.AddComponent<PointCloudLoader>();
+
+// 3. 基本設定
+cloudLoader.cloudPath = "path/to/your/pointcloud";
+cloudLoader.loadOnStart = true;
+cloudLoader.setController = staticSet;
+```
+
+### 3. 実行時の操作
+
+#### プログラムからの制御
+```csharp
+// ポイントクラウドの動的読み込み
+cloudLoader.LoadPointCloud();
+
+// ポイントクラウドの削除
+cloudLoader.RemovePointCloud();
+
+// 表示/非表示の切り替え
+pointCloudSet.SetActive(false); // 非表示
+pointCloudSet.SetActive(true);  // 表示
+
+// レンダリングの一時停止/再開
+dynamicSet.StopRenderer();
+dynamicSet.StartRenderer();
+```
+
+## API仕様
+
+### AbstractPointCloudSet
+
+#### 公開プロパティ
+```csharp
+public bool moveCenterToTransformPosition { get; set; }
+// ポイントクラウドの中心をTransformの位置に移動するかどうか
+
+public bool showBoundingBox { get; set; }
+// バウンディングボックスを表示するかどうか
+
+public MeshConfiguration meshConfiguration { get; set; }
+// 使用するメッシュ設定
+```
+
+#### 公開メソッド
+```csharp
+public void RegisterController(PointCloudLoader loader)
+// ポイントクラウドローダーを登録
+
+public void UpdateBoundingBox(PointCloudLoader loader, BoundingBox boundingBox, BoundingBox tightBoundingBox)
+// バウンディングボックスを更新
+
+public void AddRootNode(PointCloudLoader loader, Node node)
+// ルートノードを追加
+
+public void RemoveRootNode(PointCloudLoader loader)
+// ルートノードを削除
+```
+
+### DynamicPointCloudSet
+
+#### 固有プロパティ
+```csharp
+public uint pointBudget = 2000000;
+// 同時に表示する最大ポイント数
+
+public double minNodePixelSize = 150.0;
+// ノードの最小ピクセルサイズ
+
+public int cacheSize = 200;
+// キャッシュサイズ
+
+public Camera renderCamera;
+// レンダリング用カメラ
+
+public bool enableUpdates = true;
+// 更新処理の有効/無効
+
+public bool enableFrustumCulling = true;
+// フラスタムカリングの有効/無効
+```
+
+#### 固有メソッド
+```csharp
+public void StartRenderer()
+// レンダラーを開始
+
+public void StopRenderer()
+// レンダラーを停止
+
+public void SetCamera(Camera camera)
+// レンダリング用カメラを設定
+```
+
+### PointCloudLoader
+
+#### 公開プロパティ
+```csharp
+public string cloudPath;
+// ポイントクラウドのパス
+
+public bool loadOnStart = true;
+// アプリケーション開始時に自動読み込み
+
+public bool streamingAssetsAsRoot = false;
+// StreamingAssetsを基準とするかどうか
+
+public AbstractPointCloudSet setController;
+// 関連付けるPointCloudSet
+```
+
+#### 公開メソッド
+```csharp
+public void LoadPointCloud()
+// ポイントクラウドを読み込み開始
+
+public void RemovePointCloud()
+// ポイントクラウドを削除
+
+public bool IsLoaded()
+// 読み込み完了状態を取得
+
+public int GetPointCount()
+// 総ポイント数を取得
+```
+
+### MeshConfiguration
+
+#### 基本プロパティ
+```csharp
+public float pointSize = 3;
+// ポイントサイズ
+
+public bool screenSize = true;
+// スクリーンサイズ基準かどうか
+
+public bool reload = true;
+// 実行時設定変更の有効/無効
+
+public bool displayLOD = false;
+// LODバウンディングボックスの表示
+
+public bool displayBoundingBox = false;
+// バウンディングボックスの表示
+```
+
+#### 抽象メソッド
+```csharp
+public abstract void ApplyMeshConfiguration(Node node)
+// ノードにメッシュ設定を適用
+
+public abstract void RemoveFromNode(Node node)
+// ノードから設定を削除
+```
+
+### DefaultMeshConfiguration
+
+#### 固有プロパティ
+```csharp
+public Camera renderCamera;
+// レンダリング用カメラ
+
+public InterpolationMode interpolationMode = InterpolationMode.Linear;
+// 補間モード
+
+public Shader circleShader;
+// 円形表示用シェーダー
+
+public Shader quadShader;
+// クワッド表示用シェーダー
+```
+
+#### 列挙型定義
+```csharp
+public enum InterpolationMode
+{
+    None,     // 補間なし
+    Linear,   // 線形補間
+    Smooth    // スムーズ補間
+}
+```
+
+### Node
+
+#### 公開プロパティ
+```csharp
+public string Name { get; }
+// ノード名
+
+public BoundingBox BoundingBox { get; }
+// バウンディングボックス
+
+public Node Parent { get; }
+// 親ノード
+
+public Node[] Children { get; }
+// 子ノード配列
+
+public int PointCount { get; }
+// ポイント数
+
+public Vector3[] Vertices { get; set; }
+// 頂点データ
+
+public Color[] Colors { get; set; }
+// 色データ
+
+public List<GameObject> GameObjects { get; }
+// 関連GameObjectリスト
+```
+
+#### 公開メソッド
+```csharp
+public void AddChild(Node child, int index)
+// 子ノードを追加
+
+public Node GetChild(int index)
+// 指定インデックスの子ノードを取得
+
+public bool HasChild(int index)
+// 指定インデックスに子ノードが存在するかチェック
+
+public IEnumerable<Node> GetAllChildren()
+// 全ての子ノードを取得
+
+public void LoadPointData()
+// ポイントデータを読み込み
+
+public void UnloadPointData()
+// ポイントデータを解放
+```
+
+### CameraController
+
+#### 公開プロパティ
+```csharp
+public float speed = 10.0f;
+// 移動速度
+
+public float mouseSensitivity = 2.0f;
+// マウス感度
+
+public float slowSpeedMultiplier = 0.1f;
+// 低速移動時の倍率
+
+public float fastSpeedMultiplier = 3.0f;
+// 高速移動時の倍率
+```
+
+#### 入力設定
+```
+移動操作:
+- W/A/S/D: 前後左右移動
+- E/Q: 上下移動
+- Left Shift: 高速移動
+- C: 低速移動
+- マウス: 視点回転
+```
+
+## 高度な使用方法
+
+### 1. Eye Dome Lighting (EDL)
+
+#### セットアップ
+```csharp
+// 1. メインカメラにViewCameraスクリプトを追加
+Camera mainCamera = Camera.main;
+ViewCamera viewCamera = mainCamera.gameObject.AddComponent<ViewCamera>();
+mainCamera.tag = "MainCamera";
+
+// 2. EDL処理用カメラを作成
+GameObject edlCameraObject = new GameObject("EDL Camera");
+Camera edlCamera = edlCameraObject.AddComponent<Camera>();
+EdlCamera edlCameraScript = edlCameraObject.AddComponent<EdlCamera>();
+
+// 3. シェーダーを設定
+edlCameraScript.edlShader = Resources.Load<Shader>("EDL");
+edlCameraScript.edlOffShader = Resources.Load<Shader>("ScreenBlit");
+```
+
+### 2. プレビュー機能
+
+#### プレビューの設定
+```csharp
+// 1. プレビューオブジェクトを作成
+GameObject previewObject = new GameObject("Preview");
+Preview preview = previewObject.AddComponent<Preview>();
+
+// 2. プレビュー設定
+preview.setToPreview = pointCloudSet;
+preview.showPoints = true;
+preview.pointBudget = 50000;
+
+// 3. プレビュー更新
+preview.UpdatePreview();
+```
+
+### 3. 複数ポイントクラウドの管理
+
+#### DirectoryLoaderの使用
+```csharp
+// 1. DirectoryLoaderを作成
+GameObject dirLoader = new GameObject("DirectoryLoader");
+DirectoryLoader directoryLoader = dirLoader.AddComponent<DirectoryLoader>();
+
+// 2. 設定
+directoryLoader.cloudDirectory = "path/to/clouds/directory";
+directoryLoader.setController = dynamicSet;
+
+// 3. エディタでLoadDirectoryボタンを押して一括読み込み
+```
+
+## パフォーマンス最適化
+
+### 1. 設定の調整
+
+#### DynamicPointCloudSet最適化
+```csharp
+// 大規模データ用設定
+dynamicSet.pointBudget = 5000000;        // 多くのポイントを表示
+dynamicSet.minNodePixelSize = 200.0;     // 遠距離での詳細度を下げる
+dynamicSet.cacheSize = 500;              // 大きなキャッシュサイズ
+
+// 低スペック用設定
+dynamicSet.pointBudget = 1000000;        // ポイント数を制限
+dynamicSet.minNodePixelSize = 100.0;     // 高い詳細度を維持
+dynamicSet.cacheSize = 100;              // 小さなキャッシュサイズ
+```
+
+#### メッシュ設定最適化
+```csharp
+// 高速レンダリング用
+config.pointSize = 1.0f;                 // 小さなポイントサイズ
+config.screenSize = true;                // スクリーンサイズ基準
+config.displayLOD = false;               // LOD表示を無効化
+
+// 高品質レンダリング用
+config.pointSize = 3.0f;                 // 大きなポイントサイズ
+config.interpolationMode = InterpolationMode.Smooth;
+```
+
+### 2. メモリ管理
+
+#### 効率的なキャッシュ使用
+```csharp
+// V2Rendererのキャッシュ設定
+renderer.cacheSize = Mathf.Min(availableMemoryMB / 10, 1000);
+```
+
+## トラブルシューティング
+
+### よくある問題と解決方法
+
+#### 1. ポイントクラウドが表示されない
+```
+確認項目:
+- cloudPathが正しく設定されているか
+- cloud.jsまたはmetadata.jsonが存在するか
+- MeshConfigurationが正しく設定されているか
+- カメラがPointCloudSetの範囲内にあるか
+```
+
+#### 2. パフォーマンスが低い
+```
+対策:
+- pointBudgetを削減
+- minNodePixelSizeを増加
+- cacheSizeを調整
+- 不要なLOD表示を無効化
+```
+
+#### 3. VRで片目にしか表示されない
+```
+解決方法:
+- XR Project SettingsでRender Modeを"Single Pass"から"Multi Pass"に変更
+```
+
+#### 4. WebGLで動作しない
+```
+制限事項:
+- WebGLサポートは限定的
+- 代替案としてPotree (http://potree.org/) を推奨
+```
+
+この仕様書により、BA_PointCloudRendererの全機能を効果的に活用できます。
