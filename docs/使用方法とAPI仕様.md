@@ -372,21 +372,142 @@ directoryLoader.setController = dynamicSet;
 // 3. エディタでLoadDirectoryボタンを押して一括読み込み
 ```
 
+## パフォーマンス解析とボトルネック
+
+### PointBudget 1000万超過時のパフォーマンス問題
+
+PointBudgetが1000万を超える大規模ポイントクラウドの表示において、以下の主要なパフォーマンスボトルネックが確認されています：
+
+#### 1. トラバーサルスレッドの計算負荷
+
+**問題箇所**: `V2TraversalThread.cs` 線131-137
+```csharp
+// 毎フレーム実行される重い計算処理
+double slope = Math.Tan(fieldOfView / 2 * Mathf.Deg2Rad);
+double projectedSize = (screenHeight / 2.0) * rootNode.BoundingBox.Radius() / (slope * distance);
+double angle = Math.Acos(camForward.x * camToNodeCenterDir.x + camForward.y * camToNodeCenterDir.y + camForward.z * camToNodeCenterDir.z);
+```
+
+**影響**: フレームごとに数万ノードに対する三角関数計算により、CPU使用率が大幅に増加
+
+#### 2. メモリ管理とガベージコレクション
+
+**問題箇所**: `Node.cs` 線325-337, 線86-90
+- 大量の`Vector3[]`と`Color[]`配列の動的割り当て
+- LINQ操作（`Take`, `Skip`）による追加のメモリ割り当て
+- ガベージコレクションによる定期的なフレーム停止
+
+#### 3. データ構造の効率性
+
+**HeapPriorityQueue**: `Remove()`メソッドがO(n)の線形探索を使用
+**RandomAccessQueue**: LinkedListとDictionaryの二重管理によるオーバーヘッド
+**V2Cache**: ロック競合による並列処理性能の低下
+
+#### 4. GameObject生成のボトルネック
+
+**問題箇所**: `Node.cs` 線76-95
+- Unityメインスレッドでの大量GameObject生成
+- メッシュ作成時のCPU集約的処理
+- Unity Engine APIの呼び出し頻度過多
+
+### パフォーマンス改善戦略
+
+#### 即効性のある最適化（推奨度: ⭐⭐⭐）
+
+1. **計算キャッシュの導入**
+```csharp
+// 三角関数の事前計算とキャッシュ
+private float cachedTanHalfFOV;
+private readonly Dictionary<float, float> tanCache = new Dictionary<float, float>();
+
+// ベクトル計算の最適化
+float dotProduct = Vector3.Dot(camForward, camToNodeCenterDir);  // Math.Acosより高速
+```
+
+2. **適応的PointBudget調整**
+```csharp
+// カメラ移動速度に応じた動的調整
+uint adaptivePointBudget = cameraVelocity > threshold ? 
+    pointBudget * 0.5f : pointBudget;
+```
+
+3. **メモリプールパターン**
+```csharp
+// 配列の再利用によるGC負荷軽減
+private static readonly Stack<Vector3[]> VertexPool = new Stack<Vector3[]>();
+private static readonly Stack<Color[]> ColorPool = new Stack<Color[]>();
+```
+
+#### 中期的改善（推奨度: ⭐⭐）
+
+1. **階層的LODシステム強化**
+   - 距離ベースの動的品質調整
+   - 視錐台カリングの最適化
+   - 時間分散処理による負荷分散
+
+2. **並列処理の改善**
+   - lock-freeデータ構造の導入
+   - ジョブシステムによるマルチスレッド最適化
+
+#### 長期的改善（推奨度: ⭐）
+
+1. **GPU並列処理の活用**
+   - Compute Shaderでの点群選別
+   - GPU Instancingによる描画最適化
+
+2. **ストリーミング改善**
+   - 非同期I/Oとプリロード機能
+   - 適応的品質制御
+
 ## パフォーマンス最適化
 
 ### 1. 設定の調整
 
 #### DynamicPointCloudSet最適化
-```csharp
-// 大規模データ用設定
-dynamicSet.pointBudget = 5000000;        // 多くのポイントを表示
-dynamicSet.minNodePixelSize = 200.0;     // 遠距離での詳細度を下げる
-dynamicSet.cacheSize = 500;              // 大きなキャッシュサイズ
 
-// 低スペック用設定
-dynamicSet.pointBudget = 1000000;        // ポイント数を制限
-dynamicSet.minNodePixelSize = 100.0;     // 高い詳細度を維持
-dynamicSet.cacheSize = 100;              // 小さなキャッシュサイズ
+**1000万ポイント超大規模データ用設定**
+```csharp
+// 推奨設定（1000万〜5000万ポイント）
+dynamicSet.pointBudget = 5000000;           // 500万に制限（安定性重視）
+dynamicSet.minNodePixelSize = 300.0;        // 遠距離詳細度を大幅に下げる
+dynamicSet.nodesLoadedPerFrame = 5;         // 読み込み速度を制限
+dynamicSet.nodesGOsPerFrame = 10;           // GameObject生成を制限
+dynamicSet.cacheSizeInPoints = 2000000;     // キャッシュサイズ倍増
+
+// 高性能マシン用設定（5000万ポイント以上）
+dynamicSet.pointBudget = 8000000;           // 800万まで拡張
+dynamicSet.minNodePixelSize = 250.0;        // 適度な品質維持
+dynamicSet.nodesLoadedPerFrame = 8;         // 読み込み性能向上
+dynamicSet.nodesGOsPerFrame = 15;           // より多くのオブジェクト生成
+dynamicSet.cacheSizeInPoints = 3000000;     // 大容量キャッシュ
+
+// 低スペック用設定（〜1000万ポイント）
+dynamicSet.pointBudget = 1000000;           // ポイント数を制限
+dynamicSet.minNodePixelSize = 400.0;        // 低詳細度で安定性確保
+dynamicSet.nodesLoadedPerFrame = 3;         // 最小限の読み込み
+dynamicSet.nodesGOsPerFrame = 5;            // GameObject生成を最小限に
+dynamicSet.cacheSizeInPoints = 500000;      // 小さなキャッシュサイズ
+```
+
+**適応的設定の実装例**
+```csharp
+// システム性能に応じた自動調整
+int availableMemoryGB = SystemInfo.systemMemorySize / 1024;
+float gpuMemoryGB = SystemInfo.graphicsMemorySize / 1024.0f;
+
+if (availableMemoryGB >= 32 && gpuMemoryGB >= 8) {
+    // 高性能システム
+    dynamicSet.pointBudget = 8000000;
+    dynamicSet.minNodePixelSize = 200.0;
+} else if (availableMemoryGB >= 16 && gpuMemoryGB >= 4) {
+    // 中性能システム
+    dynamicSet.pointBudget = 5000000;
+    dynamicSet.minNodePixelSize = 300.0;
+} else {
+    // 低性能システム
+    dynamicSet.pointBudget = 2000000;
+    dynamicSet.minNodePixelSize = 500.0;
+}
 ```
 
 #### メッシュ設定最適化
@@ -422,13 +543,46 @@ renderer.cacheSize = Mathf.Min(availableMemoryMB / 10, 1000);
 - カメラがPointCloudSetの範囲内にあるか
 ```
 
-#### 2. パフォーマンスが低い
+#### 2. パフォーマンスが低い（特に1000万ポイント超）
+
+**症状別対策:**
+
+**フレームレート低下**
 ```
+原因: トラバーサルスレッドの計算負荷
 対策:
-- pointBudgetを削減
-- minNodePixelSizeを増加
-- cacheSizeを調整
-- 不要なLOD表示を無効化
+- pointBudgetを5000000以下に制限
+- minNodePixelSizeを300.0以上に設定
+- nodesLoadedPerFrameを5以下に制限
+- nodesGOsPerFrameを10以下に制限
+```
+
+**メモリ不足・ガベージコレクション頻発**
+```
+原因: 大量のポイントデータによるメモリ圧迫
+対策:
+- cacheSizeInPointsを適切なサイズに調整
+- 使用していないPointCloudSetを削除
+- System.GC.Collect()を定期的に実行（開発時のみ）
+- Unity Profilerでメモリ使用量を監視
+```
+
+**カメラ移動時のラグ**
+```
+原因: リアルタイム計算とGameObject生成負荷
+対策:
+- enableUpdatesを一時的にfalseに設定
+- Camera移動速度に応じたpointBudget動的調整を実装
+- 移動中はminNodePixelSizeを増加
+```
+
+**読み込み待機時間の長期化**
+```
+原因: I/O処理とファイルアクセス負荷
+対策:
+- SSD使用の推奨
+- ファイルの事前キャッシュ
+- 複数の小さなファイルより大きなファイルを優先
 ```
 
 #### 3. VRで片目にしか表示されない
